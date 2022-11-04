@@ -2,10 +2,16 @@ require('dotenv').config();
 const express = require('express');
 const dns = require('node:dns');
 const cors = require('cors');
+const mongoose = require('mongoose');
+const Shorturl = require('./models/shorturl');
+const { IdGenerator } = require("custom-random-id");
 const app = express();
 
-const mockDB = {};
-let currNum = 1;
+mongoose.connect(process.env.DB_CONNECTION, { useNewUrlParser: true, useUnifiedTopology: true });
+
+const db = mongoose.connection;
+db.on("open", () => console.log('Connected to the MongoDB database.'))
+  .on("error", console.error.bind(console, "MongoDB connection error:"));
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
@@ -19,35 +25,30 @@ app.get('/', function(req, res) {
   res.sendFile(process.cwd() + '/views/index.html');
 });
 
-app.get('/api/shorturl/:id', function(req, res) {
-  res.redirect(mockDB[req.params.id]);
+app.get('/api/shorturl/:id', async (req, res) => {
+  const shorturl = await Shorturl.findOne({shortUrl: req.params.id});
+  res.redirect(shorturl.originalUrl);
 });
 
 app.post('/api/shorturl', async (req, res) => {
   const { url } = req.body;
   const httpRegex = /(http(||s):\/\/)/g;
   const urlString = (httpRegex.test(url)) 
-    ? new URL(url) : (!httpRegex.test(url)) ? new URL('http://' + url) : url;
+    ? new URL(url) : (!httpRegex.test(url)) 
+    ? new URL('http://' + url) : url;
   
-  await dns.lookup(urlString.host, (err, add, fam) => {
+  await dns.lookup(urlString.host, async (err, add, fam) => {
     if (err) return res.json({ error: 'invalid url' });
 
-    mockDB[currNum] = urlString.href;
-    currNum++;
-    console.log(mockDB)
-    res.json({ original_url : mockDB[currNum - 1], short_url : currNum - 1});
+    const ID = new IdGenerator("{{ string_5 }}");
+    const generatedUrl = ID.getFinalExpression();
+    const newUrl = new Shorturl({
+      originalUrl: urlString.href,
+      shortUrl: generatedUrl
+    })
+    const data = await newUrl.save();
+    res.json({ original_url : data.originalUrl, short_url : data.shortUrl});
   });
-
-  /* 
-  //Alternate solution just using REGEX
-  const httpRegex = /(http(||s):\/\/)/g;
-  
-  if (httpRegex.test(req.body.url) === false) return res.json({ error: 'invalid url' });
-
-    mockDB[currNum] = req.body.url
-    currNum++;
-    console.log(mockDB)
-    res.json({ original_url : mockDB[currNum - 1], short_url : currNum - 1});*/
 });
 
 app.listen(port, function() {
